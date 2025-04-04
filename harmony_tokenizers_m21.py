@@ -64,7 +64,10 @@ class HarmonyTokenizerBase(PreTrainedTokenizer):
         self.csl_token = '<s>'
         self.mask_token = '<mask>'
         self.special_tokens = {}
+        self.bar_token = '<bar>'
         self.start_harmony_token = '<h>'
+        self.fill_token = '<fill>'
+        self.end_melody_token = '</m>'
         self.construct_basic_vocab()
         if vocab is not None:
             self.vocab = vocab
@@ -85,7 +88,9 @@ class HarmonyTokenizerBase(PreTrainedTokenizer):
                 '<emp>': 4,
                 '<mask>': 5,
                 '<bar>': 6,
-                '<h>': 7
+                '<h>': 7,
+                '</m>': 8,
+                '<fill>': 9
             }
         self.time_quantization = []  # Store predefined quantized times
 
@@ -108,6 +113,10 @@ class HarmonyTokenizerBase(PreTrainedTokenizer):
         self.bos_token_id = 2
         self.eos_token_id = 3
         self.mask_token_id = 5
+        self.bar_token_id = 6
+        self.start_harmony_token_id = 7
+        self.end_melody_token_id = 9
+        self.fill_token_id = 9
     # end construct_basic_vocab
 
     def update_ids_to_tokens(self):
@@ -409,6 +418,10 @@ class HarmonyTokenizerBase(PreTrainedTokenizer):
         return cls(vocab, special_tokens)
     # end from_pretrained
 
+    def get_structure_and_constraint(self, toks):
+        raise NotImplementedError()
+    # end get_structure_and_constraint
+
 # end class HarmonyTokenizerBase
 
 class MergedMelHarmTokenizer(PreTrainedTokenizer):
@@ -428,6 +441,10 @@ class MergedMelHarmTokenizer(PreTrainedTokenizer):
         self.empty_chord = '<emp>'
         self.csl_token = '<s>'
         self.mask_token = '<mask>'
+        self.bar_token = '<bar>'
+        self.start_harmonization_token = '<h>'
+        self.fill_token = '<fill>'
+        self.end_melody_token = '</m>'
         self.special_tokens = {}
         self._added_tokens_encoder = {} # TODO: allow for special tokens
         # merge vocabularies - start with mel_tokinzer
@@ -521,7 +538,13 @@ class MergedMelHarmTokenizer(PreTrainedTokenizer):
         return {
             'input_tokens': combined_tokens,
             'input_ids': combined_ids,
-            'attention_mask': combined_attention_mask
+            'attention_mask': combined_attention_mask,
+            'melody_tokens': melody_tokens,
+            'melody_ids': melody_ids,
+            'melody_attention': melody_attention_mask,
+            'harmony_tokens': harmony_tokens,
+            'harmony_ids': harmony_ids,
+            'harmony_attention': harmony_attention_mask,
         }
     # end encode
 
@@ -772,6 +795,85 @@ class ChordSymbolTokenizer(HarmonyTokenizerBase):
         return self.transform(corpus, add_start_harmony_token=add_start_harmony_token)
     # end __call__
 
+    def get_structure_and_constraint(self, harmony_tokens):
+        # get number of bars
+        num_bars = harmony_tokens.count('<bar>')
+        # assume no chord token as constraint so far
+        chord_token = None
+        # Find indices of all bars
+        indices = [i for i, val in enumerate(harmony_tokens) if val == '<bar>']
+        bar_index = -1
+        tries = 10
+        chord_starts_bar = False
+        while chord_token == None and tries > 0:
+            tries -= 1
+            # get a random bar
+            rand_bar_num = np.random.randint( num_bars )
+            # Get the index of the rand_bar_num occurrence (zero-based index)
+            if len(indices) > rand_bar_num+1:
+                bar_index = indices[rand_bar_num]
+                next_bar_index = indices[rand_bar_num+1]
+            else:
+                # check if there are any bars at all
+                if len(indices) == 0:
+                    return 'This piece has no bars.'
+                # the last bar
+                bar_index = indices[-1]
+                next_bar_index = len(harmony_tokens)
+            # get all tokens between rand_bar and its next
+            bar_tokens = harmony_tokens[bar_index:next_bar_index]
+            # check if bar has a chord
+            i = 0
+            while i < len(bar_tokens):
+                if 'position_' in bar_tokens[i]:
+                    # keep position token
+                    position_token = bar_tokens[i]
+                    # check if chord starts bar
+                    chord_starts_bar = bar_tokens[i] == 'position_0x00'
+                    if i+1 < len(bar_tokens):
+                        chord_token = bar_tokens[i+1]
+                    break
+                i += 1
+            # end for
+        # end while
+        # make structure and constraint tokens and mask for constraint
+        struct_constraint_tokens = []
+        # keep a mask only for the constraint, for making evaluation easier
+        constraint_chord_mask = []
+        # keep an all-ones mask to have for the input mask
+        ones_mask = []
+        if chord_token == None:
+            bar_index = -1
+        for i in indices:
+            struct_constraint_tokens.append( '<bar>' )
+            constraint_chord_mask.append(0)
+            ones_mask.append(1)
+            if bar_index == i:
+                if not chord_starts_bar:
+                    struct_constraint_tokens.append('<fill>')
+                    constraint_chord_mask.append(0)
+                    ones_mask.append(1)
+                struct_constraint_tokens.append( position_token )
+                constraint_chord_mask.append(1)
+                ones_mask.append(1)
+                struct_constraint_tokens.append( chord_token )
+                constraint_chord_mask.append(1)
+                ones_mask.append(1)
+                struct_constraint_tokens.append('<fill>')
+                constraint_chord_mask.append(0)
+                ones_mask.append(1)
+            else:
+                struct_constraint_tokens.append( '<fill>' )
+                constraint_chord_mask.append(0)
+                ones_mask.append(1)
+        return {
+            'struct_constraint_tokens': struct_constraint_tokens,
+            'struct_constraint_ids': self.convert_tokens_to_ids(struct_constraint_tokens),
+            'constraint_chord_mask': constraint_chord_mask,
+            'ones_mask': ones_mask
+        }
+    # end get_structure_and_constraint
+
 # end class ChordSymbolTokenizer
 
 class RootTypeTokenizer(HarmonyTokenizerBase):
@@ -843,6 +945,10 @@ class RootTypeTokenizer(HarmonyTokenizerBase):
         return self.transform(corpus, add_start_harmony_token=add_start_harmony_token)
     # end __call__
 
+    def get_structure_and_constraint(self, toks):
+        print('not implemented for ' + self.__class__.__name__)
+    # end get_structure_and_constraint
+
 # end class RootTypeTokenizer
 
 class PitchClassTokenizer(HarmonyTokenizerBase):
@@ -893,6 +999,93 @@ class PitchClassTokenizer(HarmonyTokenizerBase):
     def __call__(self, corpus, add_start_harmony_token=True):
         return self.transform(corpus, add_start_harmony_token=add_start_harmony_token)
     # end __call__
+
+    def get_structure_and_constraint(self, harmony_tokens):
+        # count how many bars and pick one at random
+        num_bars = harmony_tokens.count('<bar>')
+        # assume no chord token as constraint so far
+        found_chord = False
+        # Find indices of all occurrences
+        indices = [i for i, val in enumerate(harmony_tokens) if val == '<bar>']
+        bar_index = -1
+        tries = 10
+        chord_starts_bar = False
+        while not found_chord and tries > 0:
+            tries -= 1
+            # Get the index of the rand_bar_num occurrence (zero-based index)
+            # get a random bar
+            rand_bar_num = np.random.randint(num_bars)
+            if len(indices) > rand_bar_num+1:
+                bar_index = indices[rand_bar_num]
+                next_bar_index = indices[rand_bar_num+1]
+            else:
+                # check if there are any bars at all
+                if len(indices) == 0:
+                    return 'This piece has no bars.'
+                # the last bar
+                bar_index = indices[-1]
+                next_bar_index = len(harmony_tokens)
+            # get all tokens between rand_bar and its next
+            bar_tokens = harmony_tokens[bar_index:next_bar_index]
+            # keep pcs of first chord
+            pcs = []
+            i = 0
+            while i < len(bar_tokens) and not found_chord:
+                if 'position_' in bar_tokens[i]:
+                    found_chord = True
+                    # keep position token
+                    position_token = bar_tokens[i]
+                    # check if chord starts bar
+                    chord_starts_bar = bar_tokens[i] == 'position_0x00'
+                i += 1
+                while i < len(bar_tokens) and 'bar' not in bar_tokens[i] and \
+                    'position' not in bar_tokens[i] and \
+                    '</s>' not in bar_tokens[i]:
+                    if 'chord_pc_' in bar_tokens[i]:
+                        pcs.append( int( bar_tokens[i].split('chord_pc_')[1] ) )
+                    i += 1
+            # end while 1
+        # end while
+        # make structure and constraint tokens and mask for constraint
+        struct_constraint_tokens = []
+        # keep a mask only for the constraint, for making evaluation easier
+        constraint_chord_mask = []
+        # keep an all-ones mask to have for the input mask
+        ones_mask = []
+        if not found_chord:
+            bar_index = -1
+        for i in indices:
+            struct_constraint_tokens.append( '<bar>' )
+            constraint_chord_mask.append(0)
+            ones_mask.append(1)
+            if bar_index == i:
+                if not chord_starts_bar:
+                    struct_constraint_tokens.append('<fill>')
+                    constraint_chord_mask.append(0)
+                    ones_mask.append(1)
+                struct_constraint_tokens.append( position_token )
+                constraint_chord_mask.append(1)
+                ones_mask.append(1)
+                pcs.sort()
+                for pc in pcs:
+                    pc_token = f'chord_pc_{pc}'
+                    struct_constraint_tokens.append( pc_token )
+                    constraint_chord_mask.append(1)
+                    ones_mask.append(1)
+                struct_constraint_tokens.append('<fill>')
+                constraint_chord_mask.append(0)
+                ones_mask.append(1)
+            else:
+                struct_constraint_tokens.append( '<fill>' )
+                constraint_chord_mask.append(0)
+                ones_mask.append(1)
+        return {
+            'struct_constraint_tokens': struct_constraint_tokens,
+            'struct_constraint_ids': self.convert_tokens_to_ids(struct_constraint_tokens),
+            'constraint_chord_mask': constraint_chord_mask,
+            'ones_mask': ones_mask
+        }
+    # end get_structure_and_constraint
 
 # end class PitchClassTokenizer
 
@@ -951,6 +1144,10 @@ class RootPCTokenizer(HarmonyTokenizerBase):
         return self.transform(corpus, add_start_harmony_token=add_start_harmony_token)
     # end __call__
 
+    def get_structure_and_constraint(self, toks):
+        print('not implemented for ' + self.__class__.__name__)
+    # end get_structure_and_constraint
+
 # end class RootPCTokenizer
 
 class GCTRootPCTokenizer(HarmonyTokenizerBase):
@@ -1004,6 +1201,10 @@ class GCTRootPCTokenizer(HarmonyTokenizerBase):
     def __call__(self, corpus, add_start_harmony_token=True):
         return self.transform(corpus, add_start_harmony_token=add_start_harmony_token)
     # end __call__
+
+    def get_structure_and_constraint(self, toks):
+        print('not implemented for ' + self.__class__.__name__)
+    # end get_structure_and_constraint
 
 # end class GCTRootPCTokenizer
 
@@ -1084,6 +1285,10 @@ class GCTSymbolTokenizer(HarmonyTokenizerBase):
     def __call__(self, corpus, add_start_harmony_token=True):
         return self.transform(corpus, add_start_harmony_token=add_start_harmony_token)
     # end __call__
+
+    def get_structure_and_constraint(self, toks):
+        print('not implemented for ' + self.__class__.__name__)
+    # end get_structure_and_constraint
 
 # end class GCTSymbolTokenizer
 
@@ -1176,6 +1381,10 @@ class GCTRootTypeTokenizer(HarmonyTokenizerBase):
         return self.transform(corpus, add_start_harmony_token=add_start_harmony_token)
     # end __call__
 
+    def get_structure_and_constraint(self, toks):
+        print('not implemented for ' + self.__class__.__name__)
+    # end get_structure_and_constraint
+
 # end class GCTRootTypeTokenizer
 
 class MelodyPitchTokenizer(PreTrainedTokenizer):
@@ -1189,6 +1398,10 @@ class MelodyPitchTokenizer(PreTrainedTokenizer):
         self.eos_token = '</s>'
         self.mask_token = '<mask>'
         self.csl_token = '<s>'
+        self.bar_token = '<bar>'
+        self.start_harmony_token = '<h>'
+        self.fill_token = '<fill>'
+        self.end_melody_token = '</m>'
         self.min_pitch = min_pitch  # Minimum MIDI pitch value (e.g., 21 for A0)
         self.max_pitch = max_pitch  # Maximum MIDI pitch value (e.g., 108 for C8)
         self.construct_basic_vocab()
@@ -1211,7 +1424,10 @@ class MelodyPitchTokenizer(PreTrainedTokenizer):
             '</s>': 3,
             '<rest>': 4,
             '<mask>': 5,
-            '<bar>': 6
+            '<bar>': 6,
+            '<h>': 7,
+            '</m>': 8,
+            '<fill>': 9
         }
         self.time_quantization = []  # Store predefined quantized times
         self.time_signatures = []  # Store most common time signatures
@@ -1239,7 +1455,10 @@ class MelodyPitchTokenizer(PreTrainedTokenizer):
         self.bos_token_id = 2
         self.eos_token_id = 3
         self.mask_token_id = 5
-
+        self.bar_token_id = 6
+        self.start_harmony_token_id = 7
+        self.end_melody_token_id = 8
+        self.fill_token_id = 9
         # Compute and store most popular time signatures coming from predefined time tokens
         self.time_signatures = self.infer_time_signatures_from_quantization(self.time_quantization, max_quarters)
 
@@ -1420,7 +1639,9 @@ class MelodyPitchTokenizer(PreTrainedTokenizer):
                 melody_tokens = melody_tokens[:bar_idx]
                 melody_ids = melody_ids[:bar_idx]
                 attention_mask = attention_mask[:bar_idx]
-        
+        melody_tokens += [self.end_melody_token]
+        melody_ids += [self.end_melody_token_id]
+        attention_mask += [1]
         if max_length is not None:
             melody_tokens = melody_tokens[:max_length]
             melody_ids = melody_ids[:max_length]

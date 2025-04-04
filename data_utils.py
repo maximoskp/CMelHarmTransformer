@@ -82,16 +82,30 @@ class StructGPTMelHarmDataset(Dataset):
             curr_num_bars = self.num_bars
             while tmp_encoded_len > self.max_length:
                 encoded = self.merged_tokenizer.encode(data_file, max_length=self.max_length,\
-                                pad_to_max_length=self.pad_to_max_length, num_bars=curr_num_bars,\
+                                pad_to_max_length=False, num_bars=curr_num_bars,\
                                 randomization_rate = self.randomization_rate)
-                tmp_encoded_len = len(encoded['input_ids'])
+                struct_constraints = self.merged_tokenizer.harmony_tokenizer.get_structure_and_constraint(
+                    encoded['harmony_tokens']
+                )
+                tmp_encoded_len = len(encoded['melody_tokens']) + \
+                    len(struct_constraints['struct_constraint_tokens']) + \
+                    len(encoded['harmony_tokens'])
                 curr_num_bars -= 1
         else:
             encoded = self.merged_tokenizer.encode(data_file, max_length=self.max_length,\
-                            pad_to_max_length=self.pad_to_max_length, num_bars=self.num_bars)
+                            pad_to_max_length=False, num_bars=self.num_bars)
+            struct_constraints = self.merged_tokenizer.harmony_tokenizer.get_structure_and_constraint(
+                encoded['harmony_tokens']
+            )
         if self.return_harmonization_labels:
-            input_ids = torch.tensor(encoded['input_ids'], dtype=torch.long)
-            attention_mask = torch.tensor(encoded['attention_mask'], dtype=torch.long)
+            input_ids = torch.tensor(
+                encoded['melody_ids'] + struct_constraints['struct_constraint_ids'] + encoded['harmony_ids'],
+                dtype=torch.long
+            )
+            attention_mask = torch.tensor(
+                encoded['melody_attention'] + struct_constraints['ones_mask'] + encoded['harmony_attention'],
+                dtype=torch.long
+            )
             # Generate labels: mask the question part
             sep_token_idx = (input_ids == self.merged_tokenizer.vocab['<h>']).nonzero(as_tuple=True)[0]
             labels = input_ids.clone()
@@ -99,7 +113,10 @@ class StructGPTMelHarmDataset(Dataset):
             return {
                 'input_ids': input_ids,
                 'attention_mask': attention_mask,
-                'labels': labels
+                'labels': labels,
+                'constraints_mask' : torch.tensor([0]*len(encoded['melody_ids']) + \
+                    struct_constraints['constraint_chord_mask'] + \
+                    [0]*len(encoded['harmony_ids']), dtype=torch.long)
             }
         elif self.return_attention_mask:
             return {
@@ -141,18 +158,30 @@ class StructBARTMelHarmDataset(Dataset):
             curr_num_bars = self.num_bars
             while tmp_encoded_len > self.max_length:
                 encoded = self.merged_tokenizer.encode(data_file, max_length=self.max_length,\
-                                pad_to_max_length=self.pad_to_max_length, num_bars=curr_num_bars)
-                tmp_encoded_len = len(encoded['input_ids'])
+                                pad_to_max_length=False, num_bars=curr_num_bars)
+                struct_constraints = self.merged_tokenizer.harmony_tokenizer.get_structure_and_constraint(
+                    encoded['harmony_tokens']
+                )
+                tmp_encoded_len = len(encoded['melody_tokens']) + \
+                    len(struct_constraints['struct_constraint_tokens']) + \
+                    len(encoded['harmony_tokens'])
                 curr_num_bars -= 1
         else:
             encoded = self.merged_tokenizer.encode(data_file, max_length=self.max_length,\
-                            pad_to_max_length=self.pad_to_max_length, num_bars=self.num_bars)
+                            pad_to_max_length=False, num_bars=self.num_bars)
+            struct_constraints = self.merged_tokenizer.harmony_tokenizer.get_structure_and_constraint(
+                encoded['harmony_tokens']
+            )
+        input_ids = torch.tensor(
+            encoded['melody_ids'] + struct_constraints['struct_constraint_ids'],
+            dtype=torch.long
+        )
+        attention_mask = torch.tensor(
+            encoded['melody_attention'] + struct_constraints['ones_mask'],
+            dtype=torch.long
+        )
         # separate melody from harmony
-        labels = torch.tensor(encoded['input_ids']).clone()
-        start_harmony_position = np.where( np.array(encoded['input_ids']) == self.merged_tokenizer.vocab[self.merged_tokenizer.harmony_tokenizer.start_harmony_token] )[0][0]
-        input_ids = torch.tensor(encoded['input_ids'][:start_harmony_position], dtype=torch.long)
-        attention_mask = torch.tensor(encoded['attention_mask'][:start_harmony_position], dtype=torch.long)
-        labels = labels[start_harmony_position:]  # Ignore question tokens and <h> in loss computation
+        labels = torch.tensor( encoded['harmony_ids'] , dtype=torch.long )
         labels[ labels == self.merged_tokenizer.pad_token_id ] = -100
         return {
             'input_ids': input_ids,
@@ -321,11 +350,13 @@ class GenCollator:
         labels = pad_sequence([item["labels"] for item in batch], batch_first=True, padding_value=-100)
         # also neutralize all that come pre-padded from the dataset
         labels[ labels == self.pad_token_id ] = -100
+        constraints_mask = pad_sequence([item["constraints_mask"] for item in batch], batch_first=True, padding_value=0)
         
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "labels": labels,
+            'constraints_mask': constraints_mask
         }
     # end call
 # end class GenCollator
