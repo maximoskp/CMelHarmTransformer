@@ -81,7 +81,7 @@ class StructGPTMelHarmDataset(Dataset):
             tmp_encoded_len = self.max_length + 1
             curr_num_bars = self.num_bars
             while tmp_encoded_len > self.max_length:
-                encoded = self.merged_tokenizer.encode(data_file, max_length=self.max_length,\
+                encoded = self.merged_tokenizer.encode(data_file, max_length=None,\
                                 pad_to_max_length=False, num_bars=curr_num_bars,\
                                 randomization_rate = self.randomization_rate)
                 struct_constraints = self.merged_tokenizer.harmony_tokenizer.get_structure_and_constraint(
@@ -157,7 +157,7 @@ class StructBARTMelHarmDataset(Dataset):
             tmp_encoded_len = self.max_length + 1
             curr_num_bars = self.num_bars
             while tmp_encoded_len > self.max_length:
-                encoded = self.merged_tokenizer.encode(data_file, max_length=self.max_length,\
+                encoded = self.merged_tokenizer.encode(data_file, max_length=None,\
                                 pad_to_max_length=False, num_bars=curr_num_bars)
                 struct_constraints = self.merged_tokenizer.harmony_tokenizer.get_structure_and_constraint(
                     encoded['harmony_tokens']

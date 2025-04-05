@@ -1639,12 +1639,12 @@ class MelodyPitchTokenizer(PreTrainedTokenizer):
                 melody_tokens = melody_tokens[:bar_idx]
                 melody_ids = melody_ids[:bar_idx]
                 attention_mask = attention_mask[:bar_idx]
-        melody_tokens += [self.end_melody_token]
-        melody_ids += [self.end_melody_token_id]
         attention_mask += [1]
         if max_length is not None:
-            melody_tokens = melody_tokens[:max_length]
-            melody_ids = melody_ids[:max_length]
+            melody_tokens = melody_tokens[:max_length-1]
+            melody_ids = melody_ids[:max_length-1]
+            melody_tokens += [self.end_melody_token]
+            melody_ids += [self.end_melody_token_id]
             attention_mask = [1]*len(melody_ids)
             if max_length > len(melody_tokens) and pad_to_max_length:
                 if padding_side == 'right':
@@ -1655,6 +1655,9 @@ class MelodyPitchTokenizer(PreTrainedTokenizer):
                     melody_tokens =  (max_length-len(melody_tokens))*[self.pad_token] + melody_tokens
                     melody_ids = (max_length-len(melody_ids))*[self.vocab[self.pad_token]] + melody_ids
                     attention_mask = (max_length-len(attention_mask))*[0] + attention_mask
+        else:
+            melody_tokens += [self.end_melody_token]
+            melody_ids += [self.end_melody_token_id]
         # TODO: return overflowing tokens
         return {
             'input_tokens': melody_tokens,

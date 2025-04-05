@@ -63,8 +63,8 @@ def main():
 
     tokenizer = MergedMelHarmTokenizer(melody_tokenizer, harmony_tokenizer)
 
-    train_dataset = StructGPTMelHarmDataset(train_dir, tokenizer, max_length=512, num_bars=64, return_harmonization_labels=True)
-    val_dataset = StructGPTMelHarmDataset(val_dir, tokenizer, max_length=512, num_bars=64, return_harmonization_labels=True)
+    train_dataset = StructGPTMelHarmDataset(train_dir, tokenizer, max_length=512, num_bars=16, return_harmonization_labels=True)
+    val_dataset = StructGPTMelHarmDataset(val_dir, tokenizer, max_length=512, num_bars=16, return_harmonization_labels=True)
     collator = GenCollator(tokenizer)
 
     trainloader = DataLoader(train_dataset, batch_size=batchsize, shuffle=True, collate_fn=collator)

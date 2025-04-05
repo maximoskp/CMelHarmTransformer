@@ -63,8 +63,8 @@ def main():
 
     tokenizer = MergedMelHarmTokenizer(melody_tokenizer, harmony_tokenizer)
 
-    train_dataset = StructBARTMelHarmDataset(train_dir, tokenizer, max_length=512, num_bars=64)
-    val_dataset = StructBARTMelHarmDataset(val_dir, tokenizer, max_length=512, num_bars=64)
+    train_dataset = StructBARTMelHarmDataset(train_dir, tokenizer, max_length=512, num_bars=16)
+    val_dataset = StructBARTMelHarmDataset(val_dir, tokenizer, max_length=512, num_bars=16)
 
     bart_config = BartConfig(
         vocab_size=len(tokenizer.vocab),

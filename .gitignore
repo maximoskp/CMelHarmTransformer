@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 saved_models/
+tokenized/
+MIDIs/
+musicXML/
+*.zip
 
 # C extensions
 *.so
