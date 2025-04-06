@@ -355,7 +355,7 @@ class HarmonyTokenizerBase(PreTrainedTokenizer):
                 if padding_side == 'right':
                     harmony_tokens = harmony_tokens + add_eos_token*[self.eos_token] + (max_length-add_eos_token-len(harmony_tokens))*[self.pad_token]
                     harmony_ids = harmony_ids + add_eos_token*[self.vocab[self.eos_token]] + (max_length-add_eos_token-len(harmony_ids))*[self.vocab[self.pad_token]]
-                    attention_mask = attention_mask + (max_length-len(attention_mask))*[0]
+                    attention_mask = attention_mask + add_eos_token*[1] + (max_length-len(attention_mask))*[0]
                 else:
                     harmony_tokens =  (max_length-add_eos_token-len(harmony_tokens))*[self.pad_token] + harmony_tokens + add_eos_token*[self.eos_token]
                     harmony_ids = (max_length-add_eos_token-len(harmony_ids))*[self.vocab[self.pad_token]] + harmony_ids + add_eos_token*[self.vocab[self.eos_token]]
@@ -367,6 +367,10 @@ class HarmonyTokenizerBase(PreTrainedTokenizer):
                 if add_eos_token:
                     harmony_tokens[-1] = self.eos_token
                     harmony_ids[-1] = self.vocab[self.eos_token]
+        else:
+            harmony_tokens = harmony_tokens + add_eos_token*[self.eos_token]
+            harmony_ids = harmony_ids + add_eos_token*[self.vocab[self.eos_token]]
+            attention_mask = attention_mask + add_eos_token*[1]
         # TODO: return overflowing tokens
         return {
             'input_tokens': harmony_tokens,
@@ -866,6 +870,10 @@ class ChordSymbolTokenizer(HarmonyTokenizerBase):
                 struct_constraint_tokens.append( '<fill>' )
                 constraint_chord_mask.append(0)
                 ones_mask.append(1)
+        # add eos_token
+        struct_constraint_tokens += [self.eos_token]
+        constraint_chord_mask.append(0)
+        ones_mask.append(1)
         return {
             'struct_constraint_tokens': struct_constraint_tokens,
             'struct_constraint_ids': self.convert_tokens_to_ids(struct_constraint_tokens),
@@ -1079,6 +1087,10 @@ class PitchClassTokenizer(HarmonyTokenizerBase):
                 struct_constraint_tokens.append( '<fill>' )
                 constraint_chord_mask.append(0)
                 ones_mask.append(1)
+        # add eos_token
+        struct_constraint_tokens += [self.eos_token]
+        constraint_chord_mask.append(0)
+        ones_mask.append(1)
         return {
             'struct_constraint_tokens': struct_constraint_tokens,
             'struct_constraint_ids': self.convert_tokens_to_ids(struct_constraint_tokens),

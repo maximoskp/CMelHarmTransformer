@@ -3,10 +3,10 @@
 # List of Python scripts with their respective arguments
 # beam search 5 CAtest
 scripts=(
-    "generate_gpt_beam.py -t ChordSymbolTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 5 -p 2.0 -b 1"
-    "generate_gpt_beam.py -t PitchClassTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 5 -p 2.0 -b 1"
-    "generate_bart_beam.py -t ChordSymbolTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 5 -p 2.0 -b 1"
-    "generate_bart_beam.py -t PitchClassTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 5 -p 2.0 -b 1"
+    "generate_gpt_beam.py -t ChordSymbolTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 7 -p 0.0 -b 1"
+    "generate_gpt_beam.py -t PitchClassTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 7 -p 0.0 -b 1"
+    "generate_bart_beam.py -t ChordSymbolTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 7 -p 0.0 -b 1"
+    "generate_bart_beam.py -t PitchClassTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 7 -p 0.0 -b 1"
 )
 
 # Name of the conda environment

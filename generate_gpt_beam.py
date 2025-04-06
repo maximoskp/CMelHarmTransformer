@@ -150,25 +150,14 @@ def main():
 
                     do_sample = temperature > 0
 
-                    try:
-                        outputs = model.generate(
-                            input_ids=input_ids.reshape(1, input_ids.shape[0]),
-                            eos_token_id=tokenizer.eos_token_id,
-                            max_new_tokens=512,
-                            num_beams=num_beams,
-                            do_sample=do_sample,
-                            temperature=1 if not do_sample else temperature
-                        )
-                    except:
-                        print('exception: ', input_ids)
-                        outputs = model.generate(
-                            input_ids=input_ids.reshape(1, input_ids.shape[0]),
-                            eos_token_id=tokenizer.eos_token_id,
-                            max_new_tokens=512,
-                            num_beams=2,
-                            do_sample=do_sample,
-                            temperature=1 if not do_sample else temperature
-                        )
+                    outputs = model.generate(
+                        input_ids=input_ids.reshape(1, input_ids.shape[0]),
+                        eos_token_id=tokenizer.eos_token_id,
+                        max_length=model.config.max_position_embeddings,
+                        num_beams=num_beams,
+                        do_sample=do_sample,
+                        temperature=1 if not do_sample else temperature,
+                    )
                     for i in range(start_harmony_position, len(outputs[0]), 1):
                         generated_tokens.append( tokenizer.ids_to_tokens[ int(outputs[0][i]) ].replace(' ','x') )
                     
