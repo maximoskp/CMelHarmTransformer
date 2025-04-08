@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 saved_models/
 tokenized/
+tok_by_tok/
 MIDIs/
 musicXMLs/
 *.zip
