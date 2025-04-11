@@ -1,4 +1,4 @@
-from data_utils import StructBARTMelHarmDataset
+from data_utils import StructGPTMelHarmDataset, PureGenCollator
 import os
 import numpy as np
 from harmony_tokenizers_m21 import ChordSymbolTokenizer, RootTypeTokenizer, \
@@ -6,14 +6,17 @@ from harmony_tokenizers_m21 import ChordSymbolTokenizer, RootTypeTokenizer, \
     GCTSymbolTokenizer, GCTRootTypeTokenizer, MelodyPitchTokenizer, \
     MergedMelHarmTokenizer
 from torch.utils.data import DataLoader
-from transformers import BartForConditionalGeneration, BartConfig, DataCollatorForSeq2Seq,\
-                            LogitsProcessor, StoppingCriteria, StoppingCriteriaList
+from transformers import AutoConfig, GPT2LMHeadModel,\
+                    LogitsProcessor, StoppingCriteria, StoppingCriteriaList
+import torch
 import torch
 from torch.optim import AdamW
 from tqdm import tqdm
 import argparse
 import pickle
 import csv
+
+from a_star import AStarGPT
 
 tokenizers = {
     'ChordSymbolTokenizer': ChordSymbolTokenizer,
@@ -28,14 +31,14 @@ tokenizers = {
 def main():
 
     # Create the argument parser
-    parser = argparse.ArgumentParser(description='Script for MLM training a tiny RoBERTa model with a specific harmonic tokenizer.')
+    parser = argparse.ArgumentParser(description='Script for running a trained GPT2 with the astar variant.')
 
     # Define arguments
     parser.add_argument('-t', '--tokenizer', type=str, help='Specify the tokenizer name among: ' + repr(tokenizers.keys()), required=True)
     parser.add_argument('-v', '--dataval', type=str, help='Specify the full path to the root folder of the validation xml/mxl files', required=True)
     parser.add_argument('-g', '--gpu', type=int, help='Specify whether and which GPU will be used by used by index. Not using this argument means use CPU.', required=False)
-    parser.add_argument('-s', '--num_beams', type=int, help='Number of beams. Defaults to 5.', required=False)
-    parser.add_argument('-p', '--temperature', type=float, help='Temperature, defaults to 0, i.e., no sampling.', required=False)
+    parser.add_argument('-s', '--num_beams', type=int, help='Number of beams. Defaults to 20.', required=False)
+    parser.add_argument('-l', '--lookahead', type=int, help='Lookahead, defaults to 10.', required=False)
     parser.add_argument('-b', '--batchsize', type=int, help='Specify batch size. Defaults to 16.', required=False)
     
     # Parse the arguments
@@ -50,12 +53,12 @@ def main():
     batchsize = 16
     if args.batchsize:
         batchsize = args.batchsize
-    num_beams = 5
+    num_beams = 20
     if args.num_beams:
         num_beams = args.num_beams
-    temperature = 0.0
-    if args.temperature:
-        temperature = args.temperature
+    lookahead = 10
+    if args.lookahead:
+        lookahead = args.lookahead
     
     def is_sublist_contiguous(q, d):
         q_len = len(q)
@@ -68,38 +71,27 @@ def main():
     harmony_tokenizer = tokenizers[tokenizer_name].from_pretrained('saved_tokenizers/' + tokenizer_name)
 
     tokenizer = MergedMelHarmTokenizer(melody_tokenizer, harmony_tokenizer)
-
-    model_path = 'saved_models/bart/' + tokenizer_name + '/' + tokenizer_name + '.pt'
-
-    bart_config = BartConfig(
-        vocab_size=len(tokenizer.vocab),
-        pad_token_id=tokenizer.pad_token_id,
-        bos_token_id=tokenizer.bos_token_id,
-        eos_token_id=tokenizer.eos_token_id,
-        decoder_start_token_id=tokenizer.bos_token_id,
-        forced_eos_token_id=tokenizer.eos_token_id,
-        max_position_embeddings=512,
-        encoder_layers=8,
-        encoder_attention_heads=8,
-        encoder_ffn_dim=512,
-        decoder_layers=8,
-        decoder_attention_heads=8,
-        decoder_ffn_dim=512,
-        d_model=512,
-        encoder_layerdrop=0.25,
-        decoder_layerdrop=0.25,
-        dropout=0.25
-    )
-
-    model = BartForConditionalGeneration(bart_config)
     
-    val_dataset = StructBARTMelHarmDataset(val_dir, tokenizer, max_length=512, num_bars=8)
-    def create_data_collator(tokenizer, model):
-        return DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding=True)
-
-    collator = create_data_collator(tokenizer, model=model)
+    val_dataset = StructGPTMelHarmDataset(val_dir, tokenizer, max_length=512, return_harmonization_labels=True, num_bars=8)
+    collator = PureGenCollator(tokenizer)
 
     valloader = DataLoader(val_dataset, batch_size=batchsize, shuffle=False, collate_fn=collator)
+
+    model_path = 'saved_models/gpt/' + tokenizer_name + '/' + tokenizer_name + '.pt'
+
+    config = AutoConfig.from_pretrained(
+        "gpt2",
+        vocab_size=len(tokenizer.vocab),
+        n_positions=512,
+        n_layer=8,
+        n_head=8,
+        pad_token_id=tokenizer.vocab[tokenizer.pad_token],
+        bos_token_id=tokenizer.vocab[tokenizer.bos_token],
+        eos_token_id=tokenizer.vocab[tokenizer.eos_token],
+        n_embd=512
+    )
+
+    model = GPT2LMHeadModel(config)
 
     if device_name == 'cpu':
         device = torch.device('cpu')
@@ -115,7 +107,7 @@ def main():
     model.eval()
     model.to(device)
 
-    output_folder = 'tokenized/bart_beam_' + str(num_beams) + '_temp_' + str(temperature).replace('.','x') + '/'
+    output_folder = 'tokenized/gpt_astar_' + str(num_beams) + '_' + str(lookahead) + '/'
 
     os.makedirs(output_folder, exist_ok=True)
 
@@ -137,19 +129,33 @@ def main():
         with tqdm(valloader, unit='batch') as tepoch:
             tepoch.set_description(f'run')
             for batch in tepoch:
-                for bi in range( len(batch['input_ids']) ):
+                for b in batch['input_ids']:
                     melody_tokens = []
                     real_tokens = []
                     generated_tokens = []
+
                     # find the start harmony token
                     # start_harmony_position = np.where( b == tokenizer.vocab[tokenizer.harmony_tokenizer.start_harmony_token] )[0][0]
-                    real_ids = batch['labels'][bi]
-                    input_ids = batch['input_ids'][bi].to(device)
-                    for i in input_ids:
+                    real_ids = b.clone()
+                    # input_ids = b[:(start_harmony_position+1)].to(device)
+                    all_ids = b.clone()
+                    melody_end_index = all_ids.tolist().index( tokenizer.vocab['</m>'] )
+                    start_harmony_position = all_ids.tolist().index( tokenizer.vocab['<h>'] )
+                    # start_harmony_position = np.where( all_ids == harmony_start_index )[0][0]
+                    input_ids = all_ids[:(start_harmony_position+2)]
+                    constraint_ids = input_ids[melody_end_index:(start_harmony_position+1)]
+                    input_ids = input_ids.reshape(1, -1)
+
+                    print('input_ids:', input_ids)
+                    print('constraint_ids:', constraint_ids)
+
+                    astar = AStarGPT( model, tokenizer, input_ids, constraint_ids, max_length=512, beam_width=num_beams, lookahead_k=lookahead )
+                    
+                    for i in input_ids[0]:
                         melody_tokens.append( tokenizer.ids_to_tokens[ int(i) ].replace(' ','x') )
 
-                    for i in range(0, len(real_ids), 1):
-                        if real_ids[i] != tokenizer.pad_token_id and real_ids[i] >= 0:
+                    for i in range(start_harmony_position, len(real_ids), 1):
+                        if real_ids[i] != tokenizer.pad_token_id:
                             real_tokens.append( tokenizer.ids_to_tokens[ int(real_ids[i]) ].replace(' ','x') )
                     
                     # Define the bar token ID, eos_token_id, and per-batch sequence constraints
@@ -158,22 +164,11 @@ def main():
                     bars_count = (batch['input_ids'] == bar_token_id).sum(dim=1).reshape(batch['input_ids'].shape[0],-1)
                     bars_count = bars_count[0]
 
-                    do_sample = temperature > 0
-                    
-                    outputs = model.generate(
-                        input_ids=input_ids.reshape(1, input_ids.shape[0]),
-                        eos_token_id=tokenizer.eos_token_id,
-                        max_length=model.config.max_position_embeddings,
-                        num_beams=num_beams,
-                        do_sample=do_sample,
-                        temperature=1 if not do_sample else temperature
-                    )
-                    for i in range(1, len(outputs[0]), 1):
-                        generated_tokens.append( tokenizer.ids_to_tokens[ int(outputs[0][i]) ].replace(' ','x') )
-                    
-                    # remove pad from melody tokens
-                    melody_tokens = [i for i in melody_tokens if i != tokenizer.pad_token]
+                    generated_ids, _ = astar.decode()
 
+                    for i in range(start_harmony_position, generated_ids.shape[1], 1):
+                        generated_tokens.append( tokenizer.ids_to_tokens[ int(generated_ids[0,i]) ].replace(' ','x') )
+                    
                     # check whether constraint was achieved
                     # find where melody ends
                     if '</m>' in melody_tokens:

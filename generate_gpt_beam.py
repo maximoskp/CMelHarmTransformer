@@ -189,7 +189,7 @@ def main():
                         else:
                             start_index = bar_idxs[bars_count-1]
                             if bars_count - 1 == len(bar_idxs) - 1:
-                                end_index = len(bar_idxs)
+                                end_index = len(generated_tokens)
                             else:
                                 end_index = bar_idxs[bars_count]
                         constraints_area = None

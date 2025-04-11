@@ -102,10 +102,10 @@ class AStarGPT:
         tokens = self.tokenizer.convert_ids_to_tokens(input_tokens.tolist())
         start_harmonization_index = tokens.index('<h>')
         tokens = tokens[start_harmonization_index:]
-        print(f'constraint_checker: {tokens}')
-        print(f'num_bars: {tokens.count('<bar>')} - num_tokens: {len(tokens)}')
+        # print(f'constraint_checker: {tokens}')
+        # print(f'num_bars: {tokens.count('<bar>')} - num_tokens: {len(tokens)}')
         if not consistency_checker(tokens):
-            print('inconsistent')
+            # print('inconsistent')
             return False
         
         bar_count = 0
@@ -170,7 +170,7 @@ class AStarGPT:
                 continue
             
             new_logprob = node.logprob + token_prob
-            print('new_logprob:', new_logprob)
+            # print('new_logprob:', new_logprob)
             new_node = SearchNode(new_tokens, new_logprob, 0.0, parent=node)
             new_nodes.append(new_node)
         return new_nodes
@@ -196,7 +196,7 @@ class AStarGPT:
                 continue
 
             # Expand current node
-            print('children')
+            # print('children')
             children = self.expand_node(current)
 
             if children:
@@ -207,7 +207,7 @@ class AStarGPT:
                 back = current.parent
                 while back:
                     # Re-expand from back with unvisited options
-                    print('parents')
+                    # print('parents')
                     more_options = self.expand_node(back)
                     if more_options:
                         for opt in more_options:
@@ -217,7 +217,7 @@ class AStarGPT:
 
             # Prune open set
             open_set = sorted(open_set, reverse=False)[:self.beam_width]
-            print('finished:', len(finished))
+            # print('finished:', len(finished))
             # just keep the first one found
             if len(finished) >= 1:
                 break
@@ -277,10 +277,10 @@ class AStarBART:
 
     def constraint_checker(self, input_tokens):
         tokens = self.tokenizer.convert_ids_to_tokens(input_tokens.tolist())
-        print(f'constraint_checker: {tokens}')
-        print(f'num_bars: {tokens.count('<bar>')} - num_tokens: {len(tokens)}')
+        # print(f'constraint_checker: {tokens}')
+        # print(f'num_bars: {tokens.count('<bar>')} - num_tokens: {len(tokens)}')
         if not consistency_checker(tokens):
-            print('inconsistent')
+            # print('inconsistent')
             return False
         
         bar_count = 0
