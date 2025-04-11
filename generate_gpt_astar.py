@@ -72,7 +72,7 @@ def main():
 
     tokenizer = MergedMelHarmTokenizer(melody_tokenizer, harmony_tokenizer)
     
-    val_dataset = StructGPTMelHarmDataset(val_dir, tokenizer, max_length=512, return_harmonization_labels=True, num_bars=8)
+    val_dataset = StructGPTMelHarmDataset(val_dir, tokenizer, max_length=512, return_harmonization_labels=True, num_bars=16)
     collator = PureGenCollator(tokenizer)
 
     valloader = DataLoader(val_dataset, batch_size=batchsize, shuffle=False, collate_fn=collator)
@@ -116,9 +116,10 @@ def main():
         'real': [],
         'generated': [],
         'constraints': [],
-        'success': []
+        'success': [],
+        'model_calls': []
     }
-    result_fields = ['melody', 'real', 'generated', 'constraints', 'success']
+    result_fields = ['melody', 'real', 'generated', 'constraints', 'success', 'model_calls']
     with open( output_folder + tokenizer_name + '.csv', 'w' ) as f:
         writer = csv.writer(f)
         writer.writerow( result_fields )
@@ -164,7 +165,7 @@ def main():
                     bars_count = (batch['input_ids'] == bar_token_id).sum(dim=1).reshape(batch['input_ids'].shape[0],-1)
                     bars_count = bars_count[0]
 
-                    generated_ids, _ = astar.decode()
+                    generated_ids, model_calls = astar.decode()
 
                     for i in range(start_harmony_position, generated_ids.shape[1], 1):
                         generated_tokens.append( tokenizer.ids_to_tokens[ int(generated_ids[0,i]) ].replace(' ','x') )
@@ -213,13 +214,14 @@ def main():
                         with open( output_folder + tokenizer_name + '.csv', 'a' ) as f:
                             writer = csv.writer(f)
                             writer.writerow( [' '.join(melody_tokens), ' '.join(real_tokens), \
-                                    ' '.join(generated_tokens), ' '.join(after_melody), str(res)] )
+                                    ' '.join(generated_tokens), ' '.join(after_melody), str(res), str(model_calls)] )
 
                         tokenized['melodies'].append( melody_tokens )
                         tokenized['real'].append( real_tokens )
                         tokenized['generated'].append( generated_tokens )
                         tokenized['constraints'].append( after_melody )
                         tokenized['success'].append( res )
+                        tokenized['model_calls'].append( model_calls )
     # save all results to csv
     with open(output_folder + tokenizer_name + '.pickle','wb') as handle:
         pickle.dump(tokenized, handle, protocol=pickle.HIGHEST_PROTOCOL)

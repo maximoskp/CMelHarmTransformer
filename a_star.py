@@ -21,7 +21,7 @@ def consistency_checker(tokens):
         # no melody-related tokens here
         if 'P:' in tokens[i] or 'rest' in tokens[i] or \
             'fill' in tokens[i] or '<s>' in tokens[i] \
-            or 'ts_' in tokens[i]:
+            or 'ts_' in tokens[i] or 'pad' in tokens[i]:
             consistent = False
             break
         # no two consequtive position tokens
@@ -96,6 +96,10 @@ class AStarGPT:
         self.constraint_bar = bar_count
         self.position_token = position_token
         self.chord_tokens = chord_tokens
+        # print('constraint tokens: ', tokens)
+        # print('self.constraint_bar: ', self.constraint_bar)
+        # print('self.position_token: ', self.position_token)
+        # print('self.chord_tokens: ', self.chord_tokens)
     # end constraint_tokens_breakdown
 
     def constraint_checker(self, input_tokens):
@@ -103,7 +107,7 @@ class AStarGPT:
         start_harmonization_index = tokens.index('<h>')
         tokens = tokens[start_harmonization_index:]
         # print(f'constraint_checker: {tokens}')
-        # print(f'num_bars: {tokens.count('<bar>')} - num_tokens: {len(tokens)}')
+        # print(f'num_bars: {tokens.count('<bar>')} - num_tokens: {len(tokens)}', end='\r')
         if not consistency_checker(tokens):
             # print('inconsistent')
             return False
@@ -170,13 +174,14 @@ class AStarGPT:
                 continue
             
             new_logprob = node.logprob + token_prob
-            # print('new_logprob:', new_logprob)
+            # print('new_logprob:', new_logprob, end='\r')
             new_node = SearchNode(new_tokens, new_logprob, 0.0, parent=node)
             new_nodes.append(new_node)
         return new_nodes
     # end expand_node
 
     def decode(self):
+        model_calls = 0 # keep model calls for stats
         initial_node = SearchNode(tokens=self.input_ids, logprob=0.0, heuristic=0.0)
         open_set = [initial_node]
         finished = []
@@ -197,6 +202,7 @@ class AStarGPT:
 
             # Expand current node
             # print('children')
+            model_calls += 1
             children = self.expand_node(current)
 
             if children:
@@ -208,6 +214,7 @@ class AStarGPT:
                 while back:
                     # Re-expand from back with unvisited options
                     # print('parents')
+                    model_calls += 1
                     more_options = self.expand_node(back)
                     if more_options:
                         for opt in more_options:
@@ -219,6 +226,7 @@ class AStarGPT:
             open_set = sorted(open_set, reverse=False)[:self.beam_width]
             # print('finished:', len(finished))
             # just keep the first one found
+            # print('model_calls: ', model_calls, end='\r')
             if len(finished) >= 1:
                 break
 
@@ -226,7 +234,7 @@ class AStarGPT:
             raise RuntimeError("No valid sequence could be generated under constraints.")
 
         best = sorted(finished, key=lambda x: x.logprob + x.heuristic, reverse=True)[0]
-        return best.tokens, finished
+        return best.tokens, model_calls
     # end decode
 # end class AStar
 
@@ -354,6 +362,7 @@ class AStarBART:
     # end expand_node
 
     def decode(self):
+        model_calls = 0
         initial_node = SearchNode(tokens=torch.tensor([[self.tokenizer.vocab['<s>']]], device=self.model.device), logprob=0.0, heuristic=0.0)
         open_set = [initial_node]
         finished = []
@@ -365,7 +374,7 @@ class AStarBART:
             if current.tokens[0, -1].item() == self.eos_token_id and self.constraint_checker(current.tokens[0]):
                 finished.append(current)
                 continue
-
+            model_calls += 1
             children = self.expand_node(current)
             if children:
                 for child in children:
@@ -373,6 +382,7 @@ class AStarBART:
             else:
                 back = current.parent
                 while back:
+                    model_calls += 1
                     more_options = self.expand_node(back)
                     if more_options:
                         for opt in more_options:
@@ -388,6 +398,6 @@ class AStarBART:
             raise RuntimeError("No valid sequence could be generated under constraints.")
 
         best = sorted(finished, key=lambda x: x.logprob + x.heuristic, reverse=True)[0]
-        return best.tokens, finished
+        return best.tokens, model_calls
     # end decode
 # end class AStarBart
