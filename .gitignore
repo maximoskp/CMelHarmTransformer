@@ -8,6 +8,7 @@ tok_by_tok/
 MIDIs/
 musicXMLs/
 *.zip
+debug.txt
 
 # C extensions
 *.so

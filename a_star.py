@@ -2,6 +2,8 @@ import heapq
 import torch
 import torch.nn.functional as F
 
+debug_print = False
+
 class SearchNode:
     def __init__(self, tokens, logprob, heuristic, parent=None):
         self.tokens = tokens  # shape: (1, seq_len)
@@ -21,7 +23,8 @@ def consistency_checker(tokens):
         # no melody-related tokens here
         if 'P:' in tokens[i] or 'rest' in tokens[i] or \
             'fill' in tokens[i] or '<s>' in tokens[i] \
-            or 'ts_' in tokens[i] or 'pad' in tokens[i]:
+            or 'ts_' in tokens[i] or 'pad' in tokens[i] \
+            or '<\m>' in tokens[i]:
             consistent = False
             break
         # no two consequtive position tokens
@@ -53,11 +56,20 @@ def consistency_checker(tokens):
                 break
             else:
                 current_bar_time = float( tokens[i].split('_')[-1].replace('x', '.') )
+        # no two consecutive chords
+        if ':' in tokens[i-1] and ':' in tokens[i]:
+            consistent = False
+            break
+        # TODO:
+        # correct successive chords - some don't have :
+        # pitch class representation for spotting concecutive chords
+        # overall bar chords
+        # time signature related positions
     return consistent
     # end consistency_checker
 
 class AStarGPT:
-    def __init__(self, model, tokenizer, input_ids, constraint_ids, max_length=512, beam_width=10, lookahead_k=5):
+    def __init__(self, model, tokenizer, input_ids, constraint_ids, max_length=512, beam_width=10, lookahead_k=5, limit=10000):
         self.model = model
         self.tokenizer = tokenizer
         self.input_ids = input_ids
@@ -65,6 +77,7 @@ class AStarGPT:
         self.max_length = max_length
         self.beam_width = beam_width
         self.lookahead_k = lookahead_k
+        self.limit = limit
         self.eos_token_id = tokenizer.eos_token_id
         self.eos_token = tokenizer.eos_token
         self.constraint_tokens_breakdown()
@@ -77,7 +90,7 @@ class AStarGPT:
         i = 0
         while i < len(tokens):
             tok = tokens[i]
-            if 'bar' in tok or 'fill' in tok or '/m' in tok or '<h>' in tok:
+            if 'bar' in tok or 'fill' in tok or '</m>' in tok or '<h>' in tok:
                 if 'bar' in tok:
                     bar_count += 1
                 i += 1
@@ -96,6 +109,8 @@ class AStarGPT:
         self.constraint_bar = bar_count
         self.position_token = position_token
         self.chord_tokens = chord_tokens
+        # keep time as float for accelerating
+        self.position_float = float(self.position_token.split('_')[-1].replace('x','.'))
         # print('constraint tokens: ', tokens)
         # print('self.constraint_bar: ', self.constraint_bar)
         # print('self.position_token: ', self.position_token)
@@ -114,23 +129,31 @@ class AStarGPT:
         
         bar_count = 0
         found = False
+        within_bar_position_violation = False
         i = 0
         while i < len(tokens):
             tok = tokens[i]
             if tok == "<bar>":
                 bar_count += 1
-            elif bar_count == self.constraint_bar and tok == self.position_token:
-                j = 0
-                found = True
-                while j < len(self.chord_tokens):
-                    if i + j + 1 < len(tokens):
-                        if tokens[i + j + 1] != self.chord_tokens[j]:
-                            found = False
-                            break
-                    else:
+            elif bar_count == self.constraint_bar:
+                # first check if position has been exceeded
+                if 'position_' in tok:
+                    # get position float from token
+                    tok_position_float = float(tok.split('_')[-1].replace('x', '.'))
+                    if not found and tok_position_float > self.position_float:
+                        within_bar_position_violation = True
+                        found = False
                         break
-                    j += 1
-                # break
+                if tok == self.position_token:
+                    j = 0
+                    found = True
+                    while j < len(self.chord_tokens):
+                        if i + j + 1 < len(tokens):
+                            if tokens[i + j + 1] != self.chord_tokens[j]:
+                                found = False
+                                within_bar_position_violation = True
+                                break
+                        j += 1
                 # no break, we need to keep counting bars to check premature ending
             i += 1
         # if the sequence has reached eos and the constraint has not been met, it should fail
@@ -141,8 +164,11 @@ class AStarGPT:
             condition = False
             # print(f'checker PRE: {condition}')
         else:
-            condition = found or bar_count <= self.constraint_bar  # Only reject if we're past bar of interest and it's missing
+            condition = found or (not within_bar_position_violation and bar_count <= self.constraint_bar) # Only reject if we're past bar of interest and it's missing
             # print(f'checker PRE: {condition}')
+        if debug_print:
+            with open('debug.txt', 'a') as f:
+                print(f'{condition} | {tokens.count('<bar>')}: {tokens}', file=f)
         return condition
     # end constraint_checker
 
@@ -172,8 +198,13 @@ class AStarGPT:
 
             if not self.constraint_checker(new_tokens[0]):
                 continue
-            
-            new_logprob = node.logprob + token_prob
+            num_bars = (new_tokens[0]==self.tokenizer.vocab['<bar>']).sum().item()
+            new_logprob = node.logprob + \
+                token_prob * (len(new_tokens[0].tolist()) / (num_bars+1)) + \
+                1*(num_bars >= self.constraint_bar)
+            # new_logprob = node.logprob + \
+            #     token_prob * (len(new_tokens[0].tolist())**2 / (num_bars+1)) + \
+            #     100*(num_bars >= self.constraint_bar)
             # print('new_logprob:', new_logprob, end='\r')
             new_node = SearchNode(new_tokens, new_logprob, 0.0, parent=node)
             new_nodes.append(new_node)
@@ -223,15 +254,34 @@ class AStarGPT:
                     back = back.parent
 
             # Prune open set
+            if debug_print:
+                with open('debug.txt', 'a') as f:
+                    print('BEFORE:', file=f)
+                    for s in open_set:
+                        tokens = self.tokenizer.convert_ids_to_tokens(s.tokens[0].tolist())
+                        start_harmonization_index = tokens.index('<h>')
+                        tokens = tokens[start_harmonization_index:]
+                        print(tokens, file=f)
             open_set = sorted(open_set, reverse=False)[:self.beam_width]
+            if debug_print:
+                with open('debug.txt', 'a') as f:
+                    print('AFTER:', file=f)
+                    for s in open_set:
+                        tokens = self.tokenizer.convert_ids_to_tokens(s.tokens[0].tolist())
+                        start_harmonization_index = tokens.index('<h>')
+                        tokens = tokens[start_harmonization_index:]
+                        print(tokens, file=f)
             # print('finished:', len(finished))
             # just keep the first one found
             # print('model_calls: ', model_calls, end='\r')
             if len(finished) >= 1:
                 break
-
+            if model_calls >= self.limit:
+                finished = open_set
+                break
         if not finished:
-            raise RuntimeError("No valid sequence could be generated under constraints.")
+            finished = open_set
+            # raise RuntimeError("No valid sequence could be generated under constraints.")
 
         best = sorted(finished, key=lambda x: x.logprob + x.heuristic, reverse=True)[0]
         return best.tokens, model_calls
@@ -239,7 +289,7 @@ class AStarGPT:
 # end class AStar
 
 class AStarBART:
-    def __init__(self, model, tokenizer, encoder_input_ids, constraint_ids, max_length=128, beam_width=10, lookahead_k=5):
+    def __init__(self, model, tokenizer, encoder_input_ids, constraint_ids, max_length=128, beam_width=10, lookahead_k=5, limit=10000):
         self.model = model
         self.tokenizer = tokenizer
         self.encoder_input_ids = encoder_input_ids.to(model.device)
@@ -247,6 +297,7 @@ class AStarBART:
         self.max_length = max_length
         self.beam_width = beam_width
         self.lookahead_k = lookahead_k
+        self.limit = limit
         self.eos_token_id = tokenizer.eos_token_id
         self.eos_token = tokenizer.eos_token
         self.constraint_tokens_breakdown()
@@ -281,6 +332,8 @@ class AStarBART:
         self.constraint_bar = bar_count
         self.position_token = position_token
         self.chord_tokens = chord_tokens
+        # keep time as float for accelerating
+        self.position_float = float(self.position_token.split('_')[-1].replace('x','.'))
     # end constraint_tokens_breakdown
 
     def constraint_checker(self, input_tokens):
@@ -293,23 +346,31 @@ class AStarBART:
         
         bar_count = 0
         found = False
+        within_bar_position_violation = False
         i = 0
         while i < len(tokens):
             tok = tokens[i]
             if tok == "<bar>":
                 bar_count += 1
-            elif bar_count == self.constraint_bar and tok == self.position_token:
-                j = 0
-                found = True
-                while j < len(self.chord_tokens):
-                    if i + j + 1 < len(tokens):
-                        if tokens[i + j + 1] != self.chord_tokens[j]:
-                            found = False
-                            break
-                    else:
+            elif bar_count == self.constraint_bar:
+                # first check if position has been exceeded
+                if 'position_' in tok:
+                    # get position float from token
+                    tok_position_float = float(tok.split('_')[-1].replace('x', '.'))
+                    if not found and tok_position_float > self.position_float:
+                        within_bar_position_violation = True
+                        found = False
                         break
-                    j += 1
-                # break
+                if tok == self.position_token:
+                    j = 0
+                    found = True
+                    while j < len(self.chord_tokens):
+                        if i + j + 1 < len(tokens):
+                            if tokens[i + j + 1] != self.chord_tokens[j]:
+                                found = False
+                                within_bar_position_violation = True
+                                break
+                        j += 1
                 # no break, we need to keep counting bars to check premature ending
             i += 1
         # if the sequence has reached eos and the constraint has not been met, it should fail
@@ -320,8 +381,11 @@ class AStarBART:
             condition = False
             # print(f'checker PRE: {condition}')
         else:
-            condition = found or bar_count <= self.constraint_bar  # Only reject if we're past bar of interest and it's missing
+            condition = found or (not within_bar_position_violation and bar_count <= self.constraint_bar) # Only reject if we're past bar of interest and it's missing
             # print(f'checker PRE: {condition}')
+        if debug_print:
+            with open('debug.txt', 'a') as f:
+                print(f'{condition} | {tokens.count('<bar>')}: {tokens}', file=f)
         return condition
     # end constraint_checker
 
@@ -353,8 +417,10 @@ class AStarBART:
 
             if not self.constraint_checker(new_tokens[0]):
                 continue
-            
-            new_logprob = node.logprob + token_prob
+            num_bars = (new_tokens[0]==self.tokenizer.vocab['<bar>']).sum().item()
+            new_logprob = node.logprob + \
+                token_prob * (len(new_tokens[0].tolist()) / (num_bars+1)) + \
+                1*(num_bars >= self.constraint_bar)
             new_node = SearchNode(new_tokens, new_logprob, 0.0, parent=node)
             new_nodes.append(new_node)
 
@@ -393,9 +459,12 @@ class AStarBART:
             open_set = sorted(open_set, reverse=False)[:self.beam_width]
             if len(finished) >= 1:
                 break
-
+            if model_calls >= self.limit:
+                finished = open_set
+                break
         if not finished:
-            raise RuntimeError("No valid sequence could be generated under constraints.")
+            finished = open_set
+            # raise RuntimeError("No valid sequence could be generated under constraints.")
 
         best = sorted(finished, key=lambda x: x.logprob + x.heuristic, reverse=True)[0]
         return best.tokens, model_calls

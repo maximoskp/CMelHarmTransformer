@@ -1,4 +1,4 @@
-from data_utils import StructGPTMelHarmDataset, PureGenCollator
+from data_utils import StructBARTMelHarmDataset
 import os
 import numpy as np
 from harmony_tokenizers_m21 import ChordSymbolTokenizer, RootTypeTokenizer, \
@@ -6,8 +6,7 @@ from harmony_tokenizers_m21 import ChordSymbolTokenizer, RootTypeTokenizer, \
     GCTSymbolTokenizer, GCTRootTypeTokenizer, MelodyPitchTokenizer, \
     MergedMelHarmTokenizer
 from torch.utils.data import DataLoader
-from transformers import AutoConfig, GPT2LMHeadModel,\
-                    LogitsProcessor, StoppingCriteria, StoppingCriteriaList
+from transformers import BartForConditionalGeneration, BartConfig, DataCollatorForSeq2Seq
 import torch
 import torch
 from torch.optim import AdamW
@@ -16,7 +15,7 @@ import argparse
 import pickle
 import csv
 
-from a_star import AStarGPT
+from a_star import AStarBART
 
 tokenizers = {
     'ChordSymbolTokenizer': ChordSymbolTokenizer,
@@ -72,26 +71,37 @@ def main():
 
     tokenizer = MergedMelHarmTokenizer(melody_tokenizer, harmony_tokenizer)
     
-    val_dataset = StructGPTMelHarmDataset(val_dir, tokenizer, max_length=512, return_harmonization_labels=True, num_bars=16)
-    collator = PureGenCollator(tokenizer)
+    model_path = 'saved_models/bart/' + tokenizer_name + '/' + tokenizer_name + '.pt'
 
-    valloader = DataLoader(val_dataset, batch_size=batchsize, shuffle=False, collate_fn=collator)
-
-    model_path = 'saved_models/gpt/' + tokenizer_name + '/' + tokenizer_name + '.pt'
-
-    config = AutoConfig.from_pretrained(
-        "gpt2",
+    bart_config = BartConfig(
         vocab_size=len(tokenizer.vocab),
-        n_positions=512,
-        n_layer=8,
-        n_head=8,
-        pad_token_id=tokenizer.vocab[tokenizer.pad_token],
-        bos_token_id=tokenizer.vocab[tokenizer.bos_token],
-        eos_token_id=tokenizer.vocab[tokenizer.eos_token],
-        n_embd=512
+        pad_token_id=tokenizer.pad_token_id,
+        bos_token_id=tokenizer.bos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+        decoder_start_token_id=tokenizer.bos_token_id,
+        forced_eos_token_id=tokenizer.eos_token_id,
+        max_position_embeddings=512,
+        encoder_layers=8,
+        encoder_attention_heads=8,
+        encoder_ffn_dim=512,
+        decoder_layers=8,
+        decoder_attention_heads=8,
+        decoder_ffn_dim=512,
+        d_model=512,
+        encoder_layerdrop=0.25,
+        decoder_layerdrop=0.25,
+        dropout=0.25
     )
 
-    model = GPT2LMHeadModel(config)
+    model = BartForConditionalGeneration(bart_config)
+    
+    val_dataset = StructBARTMelHarmDataset(val_dir, tokenizer, max_length=512, num_bars=8)
+    def create_data_collator(tokenizer, model):
+        return DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding=True)
+
+    collator = create_data_collator(tokenizer, model=model)
+
+    valloader = DataLoader(val_dataset, batch_size=batchsize, shuffle=False, collate_fn=collator)
 
     if device_name == 'cpu':
         device = torch.device('cpu')
@@ -107,7 +117,7 @@ def main():
     model.eval()
     model.to(device)
 
-    output_folder = 'tokenized/gpt_astar_' + str(num_beams) + '_' + str(lookahead) + '/'
+    output_folder = 'tokenized/bart_astar_' + str(num_beams) + '_' + str(lookahead) + '/'
 
     os.makedirs(output_folder, exist_ok=True)
 
@@ -130,32 +140,27 @@ def main():
         with tqdm(valloader, unit='batch') as tepoch:
             tepoch.set_description(f'run')
             for batch in tepoch:
-                for b in batch['input_ids']:
+                for bi in range( len(batch['input_ids']) ):
                     melody_tokens = []
                     real_tokens = []
                     generated_tokens = []
-
                     # find the start harmony token
                     # start_harmony_position = np.where( b == tokenizer.vocab[tokenizer.harmony_tokenizer.start_harmony_token] )[0][0]
-                    real_ids = b.clone()
+                    real_ids = batch['labels'][bi]
+                    input_ids = batch['input_ids'][bi].reshape(1,-1).to(device)
                     # input_ids = b[:(start_harmony_position+1)].to(device)
-                    all_ids = b.clone()
-                    melody_end_index = all_ids.tolist().index( tokenizer.vocab['</m>'] )
-                    start_harmony_position = all_ids.tolist().index( tokenizer.vocab['<h>'] )
-                    # start_harmony_position = np.where( all_ids == harmony_start_index )[0][0]
-                    input_ids = all_ids[:(start_harmony_position+2)]
-                    constraint_ids = input_ids[melody_end_index:(start_harmony_position+1)]
-                    input_ids = input_ids.reshape(1, -1)
+                    melody_end_index = input_ids[0].tolist().index( tokenizer.vocab['</m>'] )
+                    constraint_ids = input_ids[0][melody_end_index:]
 
                     # print('input_ids:', input_ids)
                     # print('constraint_ids:', constraint_ids)
 
-                    astar = AStarGPT( model, tokenizer, input_ids, constraint_ids, max_length=512, beam_width=num_beams, lookahead_k=lookahead )
+                    astar = AStarBART( model, tokenizer, input_ids, constraint_ids, max_length=512, beam_width=num_beams, lookahead_k=lookahead )
                     
                     for i in input_ids[0]:
                         melody_tokens.append( tokenizer.ids_to_tokens[ int(i) ].replace(' ','x') )
 
-                    for i in range(start_harmony_position, len(real_ids), 1):
+                    for i in range(0, len(real_ids), 1):
                         if real_ids[i] != tokenizer.pad_token_id:
                             real_tokens.append( tokenizer.ids_to_tokens[ int(real_ids[i]) ].replace(' ','x') )
                     
@@ -167,7 +172,7 @@ def main():
 
                     generated_ids, model_calls = astar.decode()
 
-                    for i in range(start_harmony_position, generated_ids.shape[1], 1):
+                    for i in range(generated_ids.shape[1]):
                         generated_tokens.append( tokenizer.ids_to_tokens[ int(generated_ids[0,i]) ].replace(' ','x') )
                     
                     # check whether constraint was achieved
