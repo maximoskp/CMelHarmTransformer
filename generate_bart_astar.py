@@ -154,7 +154,6 @@ def main():
 
                     # print('input_ids:', input_ids)
                     # print('constraint_ids:', constraint_ids)
-
                     astar = AStarBART( model, tokenizer, input_ids, constraint_ids, max_length=512, beam_width=num_beams, lookahead_k=lookahead )
                     
                     for i in input_ids[0]:

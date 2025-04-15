@@ -18,8 +18,7 @@ tokenizers = {
 
 # tokenized_folders = ['bart_beam_7_temp_0x0', 'gpt_beam_7_temp_0x0']
 # tokenized_folders = ['no_bart_beam_7_temp_0x0', 'no_gpt_beam_7_temp_0x0']
-# tokenized_folders = ['bart_astar_10_5']
-tokenized_folders = ['gpt_astar_10_5']
+tokenized_folders = ['bart_astar_10_5', 'gpt_astar_10_5']
 
 tokenizer_names = ['ChordSymbolTokenizer', 'PitchClassTokenizer']
 # tokenizer_names = ['PitchClassTokenizer']

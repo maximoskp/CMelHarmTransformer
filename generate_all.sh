@@ -17,11 +17,23 @@
 # )
 
 # astar
+# scripts=(
+#     "generate_gpt_astar.py -t ChordSymbolTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 4 -l 4 -b 1"
+#     "generate_gpt_astar.py -t PitchClassTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 4 -l 4 -b 1"
+#     "generate_bart_astar.py -t ChordSymbolTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 1 -s 4 -l 4 -b 1"
+#     "generate_bart_astar.py -t PitchClassTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 1 -s 4 -l 4 -b 1"
+# )
+# scripts=(
+#     "generate_gpt_astar.py -t ChordSymbolTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 50 -l 25 -b 1"
+#     "generate_gpt_astar.py -t PitchClassTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 50 -l 25 -b 1"
+#     "generate_bart_astar.py -t ChordSymbolTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 1 -s 50 -l 25 -b 1"
+#     "generate_bart_astar.py -t PitchClassTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 1 -s 50 -l 25 -b 1"
+# )
 scripts=(
     "generate_gpt_astar.py -t ChordSymbolTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 10 -l 5 -b 1"
     "generate_gpt_astar.py -t PitchClassTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 10 -l 5 -b 1"
-    "generate_bart_astar.py -t ChordSymbolTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 10 -l 5 -b 1"
-    "generate_bart_astar.py -t PitchClassTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 0 -s 10 -l 5 -b 1"
+    "generate_bart_astar.py -t ChordSymbolTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 1 -s 10 -l 5 -b 1"
+    "generate_bart_astar.py -t PitchClassTokenizer -v /media/maindisk/maximos/data/hooktheory_test -g 1 -s 10 -l 5 -b 1"
 )
 
 # Name of the conda environment

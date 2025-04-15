@@ -90,7 +90,8 @@ class AStarGPT:
         i = 0
         while i < len(tokens):
             tok = tokens[i]
-            if 'bar' in tok or 'fill' in tok or '</m>' in tok or '<h>' in tok:
+            if 'bar' in tok or 'fill' in tok or '/m' in tok \
+                or '<h>' in tok or '<s>' in tokens[i] or '</s>' in tokens[i]:
                 if 'bar' in tok:
                     bar_count += 1
                 i += 1
@@ -199,9 +200,8 @@ class AStarGPT:
             if not self.constraint_checker(new_tokens[0]):
                 continue
             num_bars = (new_tokens[0]==self.tokenizer.vocab['<bar>']).sum().item()
-            new_logprob = node.logprob + \
-                token_prob * (len(new_tokens[0].tolist()) / (num_bars+1)) + \
-                1*(num_bars >= self.constraint_bar)
+            new_logprob = node.logprob - \
+                token_prob * (len(new_tokens[0].tolist()) / (num_bars+1))
             # new_logprob = node.logprob + \
             #     token_prob * (len(new_tokens[0].tolist())**2 / (num_bars+1)) + \
             #     100*(num_bars >= self.constraint_bar)
@@ -218,6 +218,8 @@ class AStarGPT:
         finished = []
         while open_set:
             current = heapq.heappop(open_set)
+            # print('len(open_set) 0', len(open_set))
+            # print('len(current.tokens)', len(current.tokens))
 
             # if current.tokens.shape[-1] >= self.max_length or (
             #     self.eos_token_id and current.tokens[0, -1].item() == self.eos_token_id
@@ -230,59 +232,47 @@ class AStarGPT:
                 continue
             if current.tokens.shape[-1] >= self.max_length:
                 continue
-
+            
             # Expand current node
             # print('children')
-            model_calls += 1
             children = self.expand_node(current)
-
+            model_calls += 1
+            
             if children:
                 for child in children:
                     heapq.heappush(open_set, child)
+                    # print('child: ', len(open_set), ' - ', model_calls)
             else:
                 # No valid expansions – backtrack to unvisited options
                 back = current.parent
                 while back:
                     # Re-expand from back with unvisited options
                     # print('parents')
-                    model_calls += 1
                     more_options = self.expand_node(back)
+                    model_calls += 1
                     if more_options:
                         for opt in more_options:
                             heapq.heappush(open_set, opt)
+                            # print('opt: ', len(open_set), ' - ', model_calls)
                         break
                     back = back.parent
 
             # Prune open set
-            if debug_print:
-                with open('debug.txt', 'a') as f:
-                    print('BEFORE:', file=f)
-                    for s in open_set:
-                        tokens = self.tokenizer.convert_ids_to_tokens(s.tokens[0].tolist())
-                        start_harmonization_index = tokens.index('<h>')
-                        tokens = tokens[start_harmonization_index:]
-                        print(tokens, file=f)
-            open_set = sorted(open_set, reverse=False)[:self.beam_width]
-            if debug_print:
-                with open('debug.txt', 'a') as f:
-                    print('AFTER:', file=f)
-                    for s in open_set:
-                        tokens = self.tokenizer.convert_ids_to_tokens(s.tokens[0].tolist())
-                        start_harmonization_index = tokens.index('<h>')
-                        tokens = tokens[start_harmonization_index:]
-                        print(tokens, file=f)
-            # print('finished:', len(finished))
-            # just keep the first one found
-            # print('model_calls: ', model_calls, end='\r')
+            # open_set = sorted(open_set, reverse=False)[:self.beam_width]
+            open_set = sorted(open_set, reverse=False)
+            # print('len(open_set) 1', len(open_set))
             if len(finished) >= 1:
+                # print('SUCCESS')
                 break
             if model_calls >= self.limit:
+                # print('len(open_set) 2', len(open_set))
                 finished = open_set
+                # print('FAILURE')
                 break
         if not finished:
+            # print('NOT FINISHED')
             finished = open_set
             # raise RuntimeError("No valid sequence could be generated under constraints.")
-
         best = sorted(finished, key=lambda x: x.logprob + x.heuristic, reverse=True)[0]
         return best.tokens, model_calls
     # end decode
@@ -313,7 +303,8 @@ class AStarBART:
         i = 0
         while i < len(tokens):
             tok = tokens[i]
-            if 'bar' in tok or 'fill' in tok or '/m' in tok or '<h>' in tok:
+            if 'bar' in tok or 'fill' in tok or '/m' in tok \
+                or '<h>' in tok or '<s>' in tokens[i] or '</s>' in tokens[i]:
                 if 'bar' in tok:
                     bar_count += 1
                 i += 1
@@ -330,7 +321,10 @@ class AStarBART:
                     i += 1
                 break
         self.constraint_bar = bar_count
-        self.position_token = position_token
+        try:
+            self.position_token = position_token
+        except:
+            print(tokens)
         self.chord_tokens = chord_tokens
         # keep time as float for accelerating
         self.position_float = float(self.position_token.split('_')[-1].replace('x','.'))
@@ -419,8 +413,10 @@ class AStarBART:
                 continue
             num_bars = (new_tokens[0]==self.tokenizer.vocab['<bar>']).sum().item()
             new_logprob = node.logprob + \
-                token_prob * (len(new_tokens[0].tolist()) / (num_bars+1)) + \
-                1*(num_bars >= self.constraint_bar)
+                token_prob * (len(new_tokens[0].tolist()) / (num_bars+1))
+            # new_logprob = node.logprob + \
+            #     token_prob * (len(new_tokens[0].tolist()) / (num_bars+1)) + \
+            #     1*(num_bars >= self.constraint_bar)
             new_node = SearchNode(new_tokens, new_logprob, 0.0, parent=node)
             new_nodes.append(new_node)
 
@@ -440,23 +436,24 @@ class AStarBART:
             if current.tokens[0, -1].item() == self.eos_token_id and self.constraint_checker(current.tokens[0]):
                 finished.append(current)
                 continue
-            model_calls += 1
             children = self.expand_node(current)
+            model_calls += 1
             if children:
                 for child in children:
                     heapq.heappush(open_set, child)
             else:
                 back = current.parent
                 while back:
-                    model_calls += 1
                     more_options = self.expand_node(back)
+                    model_calls += 1
                     if more_options:
                         for opt in more_options:
                             heapq.heappush(open_set, opt)
                         break
                     back = back.parent
-
-            open_set = sorted(open_set, reverse=False)[:self.beam_width]
+            # heapq.heappush(open_set, current) # put current back to keep it as a contenstent if necessary
+            # open_set = sorted(open_set, reverse=False)[:self.beam_width]
+            open_set = sorted(open_set, reverse=False)
             if len(finished) >= 1:
                 break
             if model_calls >= self.limit:
